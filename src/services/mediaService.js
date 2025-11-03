@@ -1,3 +1,6 @@
+import { Hands } from '@mediapipe/hands';
+import { Camera } from '@mediapipe/camera_utils';
+
 export class MediaService {
   constructor() {
     this.camera = null;
@@ -14,23 +17,32 @@ export class MediaService {
     this.onResults = onResults;
 
     try {
-      // Simple camera initialization without MediaPipe for now
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { width: 640, height: 480 } 
-      });
-      
-      this.videoElement.srcObject = stream;
-      this.videoElement.play();
-      
-      // Mock hand detection for testing
-      setInterval(() => {
-        if (this.onResults) {
-          this.onResults({
-            image: this.videoElement,
-            multiHandLandmarks: [] // Empty for now
-          });
+      // Initialize MediaPipe Hands
+      this.hands = new Hands({
+        locateFile: (file) => {
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
         }
-      }, 100);
+      });
+
+      this.hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      this.hands.onResults(this.onResults);
+
+      // Initialize camera
+      this.camera = new Camera(this.videoElement, {
+        onFrame: async () => {
+          if (this.hands) {
+            await this.hands.send({ image: this.videoElement });
+          }
+        },
+        width: 640,
+        height: 480
+      });
 
       this.isInitialized = true;
       return true;
@@ -44,14 +56,19 @@ export class MediaService {
     if (!this.isInitialized) {
       throw new Error('MediaService not initialized');
     }
-    return true; // Already started in initialize
+
+    try {
+      await this.camera.start();
+      return true;
+    } catch (error) {
+      console.error('Failed to start camera:', error);
+      throw error;
+    }
   }
 
   stopCamera() {
-    if (this.videoElement && this.videoElement.srcObject) {
-      const tracks = this.videoElement.srcObject.getTracks();
-      tracks.forEach(track => track.stop());
-      this.videoElement.srcObject = null;
+    if (this.camera) {
+      this.camera.stop();
     }
   }
 
@@ -77,6 +94,9 @@ export class MediaService {
 
   destroy() {
     this.stopCamera();
+    if (this.hands) {
+      this.hands.close();
+    }
     this.isInitialized = false;
   }
 }
